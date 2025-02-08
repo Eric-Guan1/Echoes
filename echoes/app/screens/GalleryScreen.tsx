@@ -98,7 +98,7 @@ export default function PhotoGallery() {
     );
   }
 
-  async function formatLocation(coords: Coords): Promise<string> {
+  function formatLocation(coords: Coords): string {
     const { latitude, longitude } = coords;
     // The "zoom" parameter controls the detail level (18 is very detailed).
     // const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`;
