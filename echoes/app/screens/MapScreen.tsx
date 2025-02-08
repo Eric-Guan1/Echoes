@@ -3,6 +3,7 @@ import { View, ActivityIndicator, StyleSheet, Alert, Image, TouchableOpacity, Mo
 import MapView, { Marker, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
 import * as MediaLibrary from 'expo-media-library';
+import { useNavigation } from "expo-router";
 
 // Type Definitions
 type Coords = { latitude: number; longitude: number };
@@ -14,6 +15,11 @@ export default function MapScreen() {
   const [loading, setLoading] = useState(true);
   const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null); // Stores tapped photo
   const [modalVisible, setModalVisible] = useState(false); // Controls full-screen modal
+  const navigation = useNavigation();
+
+  useEffect(() => {
+    navigation.setOptions({ headerShown: false }); // Remove the title
+  }, [navigation]);
 
   useEffect(() => {
     (async () => {

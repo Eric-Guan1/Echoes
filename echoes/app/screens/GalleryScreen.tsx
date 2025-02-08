@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   Modal,
   ScrollView,
+  Dimensions,
 } from 'react-native';
 import * as Location from 'expo-location';
 import { BlurView } from 'expo-blur';
@@ -34,7 +35,7 @@ type Coords = {
   longitude: number;
 };
 
-type Photo = {
+export type Photo = {
   id: string;
   uri: string;
   location: Coords;
@@ -188,7 +189,7 @@ const PhotoList = React.memo(
 );
 
 /**
- * Main PhotoGallery component.
+ * The main PhotoGallery component.
  */
 export default function PhotoGallery() {
   const [currentLocation, setCurrentLocation] = useState<Coords | null>(null);
@@ -198,7 +199,8 @@ export default function PhotoGallery() {
   const [hasNextPage, setHasNextPage] = useState<boolean>(true);
   const [loading, setLoading] = useState<boolean>(true);
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
-  const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
+  // Instead of storing a selected photo, we now store its index.
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const navigation = useNavigation();
 
   useEffect(() => {
@@ -382,9 +384,12 @@ export default function PhotoGallery() {
     }
   }, [currentLocation, hasNextPage, loadingMore]);
 
-  // When a photo is tapped, set it as the selected photo to open the zoom modal.
+  // When a photo is tapped, determine its index in the array and open the modal.
   const handlePhotoPress = (photo: Photo) => {
-    setSelectedPhoto(photo);
+    const index = photos.findIndex((p) => p.id === photo.id);
+    if (index !== -1) {
+      setSelectedIndex(index);
+    }
   };
 
   return (
@@ -407,33 +412,66 @@ export default function PhotoGallery() {
         />
       )}
 
-      {/* Modal for zooming in on a photo */}
-      <Modal visible={!!selectedPhoto} transparent={true} animationType="fade">
-        <View style={styles.modalBackground}>
-          <TouchableOpacity style={styles.modalCloseButton} onPress={() => setSelectedPhoto(null)}>
-            <Text style={styles.modalCloseText}>Close</Text>
-          </TouchableOpacity>
-          <ScrollView
-            style={styles.modalScrollView}
-            maximumZoomScale={3}
-            minimumZoomScale={1}
-            contentContainerStyle={styles.modalContentContainer}
-          >
-            {selectedPhoto && (
-              <Image source={{ uri: selectedPhoto.uri }} style={styles.modalImage} />
-            )}
-          </ScrollView>
-        </View>
+      {/* Modal for swiping between photos */}
+      <Modal visible={selectedIndex !== null} transparent={true} animationType="fade">
+        <ModalPhotoViewer
+          photos={photos}
+          initialIndex={selectedIndex !== null ? selectedIndex : 0}
+          onClose={() => setSelectedIndex(null)}
+        />
       </Modal>
     </View>
   );
 }
 
+/**
+ * ModalPhotoViewer renders a horizontally swipable, full-screen photo viewer.
+ * Each photo is wrapped in a ScrollView to allow pinch-to-zoom.
+ */
+const ModalPhotoViewer = ({
+  photos,
+  initialIndex,
+  onClose,
+}: {
+  photos: Photo[];
+  initialIndex: number;
+  onClose: () => void;
+}) => {
+  const { width, height } = Dimensions.get('window');
+  return (
+    <View style={styles.modalBackground}>
+      <TouchableOpacity style={styles.modalCloseButton} onPress={onClose}>
+        <Text style={styles.modalCloseText}>Close</Text>
+      </TouchableOpacity>
+      <FlatList
+        data={photos}
+        horizontal
+        pagingEnabled
+        initialScrollIndex={initialIndex}
+        getItemLayout={(_data, index) => ({
+          length: width,
+          offset: width * index,
+          index,
+        })}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item }) => (
+          <ScrollView
+            maximumZoomScale={3}
+            minimumZoomScale={1}
+            contentContainerStyle={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}
+          >
+            <Image source={{ uri: item.uri }} style={{ width, height, resizeMode: 'contain' }} />
+          </ScrollView>
+        )}
+      />
+    </View>
+  );
+};
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F5F5F7', 
-    // backgroundColor: 'rgba(245, 245, 247, 0.38)', 
     paddingTop: 30,
   },
   header: {
@@ -472,8 +510,6 @@ const styles = StyleSheet.create({
   modalBackground: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.9)',
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   modalCloseButton: {
     position: 'absolute',
@@ -485,19 +521,5 @@ const styles = StyleSheet.create({
   modalCloseText: {
     color: '#fff',
     fontSize: 18,
-  },
-  modalScrollView: {
-    flex: 1,
-    width: '100%',
-  },
-  modalContentContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalImage: {
-    width: '100%',
-    height: '100%',
-    resizeMode: 'contain',
   },
 });

@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 // Import Screens
 import GalleryScreen from '../screens/GalleryScreen';
 import MapScreen from '../screens/MapScreen';
+import ARCamera from '../screens/ARCamera';
 
 // Bottom Tab Navigator
 const Tab = createBottomTabNavigator();
@@ -21,6 +22,7 @@ export default function Navigator() {
       })}
     >
       <Tab.Screen name="Gallery" component={GalleryScreen} />
+      <Tab.Screen name="AR" component={ARCamera} />
       <Tab.Screen name="Map" component={MapScreen} />
     </Tab.Navigator>
   );
