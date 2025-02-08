@@ -1,12 +1,12 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { 
-  View, 
-  Text, 
-  FlatList, 
-  Image, 
-  StyleSheet, 
-  Alert, 
-  ActivityIndicator 
+import {
+  View,
+  Text,
+  FlatList,
+  Image,
+  StyleSheet,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import * as Location from 'expo-location';
 import * as MediaLibrary from 'expo-media-library';
@@ -24,9 +24,9 @@ interface ExtendedAsset extends MediaLibrary.Asset {
 }
 
 // Type definitions for our app
-type Coords = { 
-  latitude: number; 
-  longitude: number; 
+type Coords = {
+  latitude: number;
+  longitude: number;
 };
 
 type Photo = {
@@ -35,6 +35,59 @@ type Photo = {
   location: Coords;
 };
 
+/**
+ * Helper function that wraps fetch with a timeout using AbortController.
+ * @param resource URL or RequestInfo
+ * @param options fetch options including an optional timeout in milliseconds.
+ */
+async function fetchWithTimeout(
+  resource: RequestInfo,
+  options: RequestInit & { timeout?: number } = {}
+): Promise<Response> {
+  const { timeout = 10000 } = options; // Default timeout: 10 seconds.
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    const response = await fetch(resource, {
+      ...options,
+      signal: controller.signal,
+    });
+    return response;
+  } finally {
+    clearTimeout(id);
+  }
+}
+
+/**
+ * Reverse geocoding function that returns a human-readable location string.
+ * It uses fetchWithTimeout so that slow responses don’t block the UI.
+ */
+async function formatLocation(coords: Coords): Promise<string> {
+  const { latitude, longitude } = coords;
+  const url = `http://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`;
+console.log(url);
+
+  try {
+    const response = await fetchWithTimeout(url, {
+      timeout: 15000, // 15 seconds timeout
+    });
+    const data = await response.json();
+    console.log(data);
+
+    if (data && data.display_name) {
+      return data.display_name;
+    }
+  } catch (error) {
+    console.error('Error during reverse geocoding:', error);
+  }
+  // Fallback to a simple lat/lon string if reverse geocoding fails.
+  return `Lat: ${latitude.toFixed(2)}, Lon: ${longitude.toFixed(2)}`;
+}
+
+/**
+ * The main PhotoGallery component.
+ */
 export default function PhotoGallery() {
   const [currentLocation, setCurrentLocation] = useState<Coords | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -45,52 +98,12 @@ export default function PhotoGallery() {
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
 
   // Create an in-memory cache for asset info.
-  // We now store ExtendedAsset objects, which include location/localUri.
   const assetCache = useRef<Map<string, ExtendedAsset>>(new Map());
 
-  useEffect(() => {
-    (async () => {
-      // Request location permission
-      const { status: locStatus } = await Location.requestForegroundPermissionsAsync();
-      if (locStatus !== 'granted') {
-        Alert.alert('Permission denied', 'Location permission is required.');
-        return;
-      }
-      // Request media library permission
-      const { status: mediaStatus } = await MediaLibrary.requestPermissionsAsync();
-      if (mediaStatus !== 'granted') {
-        Alert.alert('Permission denied', 'Media library access is required.');
-        return;
-      }
-
-      // Get current location
-      const locResult = await Location.getCurrentPositionAsync({});
-      const coords = locResult.coords;
-      setCurrentLocation(coords);
-
-      // Check if this location was visited before
-      const alreadyVisited = visitedLocations.some((prev) => isSameLocation(prev, coords, 0.01));
-      if (alreadyVisited) {
-        sendNotification(`You're at ${formatLocation(coords)}! Remember this moment?`);
-      } else {
-        sendNotification(`You're at ${formatLocation(coords)}! Capture the moment?`);
-        setVisitedLocations((prev) => [...prev, coords]);
-      }
-
-      // Load the first batch of photos
-      await loadMorePhotos(coords);
-      setLoading(false);
-    })();
-  }, []);
-
-  async function sendNotification(message: string) {
-    await Notifications.scheduleNotificationAsync({
-      content: { title: 'Location Alert', body: message },
-      trigger: null,
-    });
-  }
-
-  // Simple location comparison using a threshold
+  /**
+   * Simple location comparison using a threshold.
+   * Returns true if both coordinates are within `threshold` of each other.
+   */
   function isSameLocation(a: Coords, b: Coords, threshold: number): boolean {
     return (
       Math.abs(a.latitude - b.latitude) < threshold &&
@@ -98,44 +111,28 @@ export default function PhotoGallery() {
     );
   }
 
-  async function formatLocation(coords: Coords): Promise<string> {
-    const { latitude, longitude } = coords;
-    // The "zoom" parameter controls the detail level (18 is very detailed).
-    // const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`;
-    
-    // try {
-    //   const response = await fetch(url, {
-    //     // It's good practice to include a valid User-Agent string per Nominatim's policy.
-    //     headers: { 'User-Agent': 'YourAppName/1.0 (your-email@example.com)' }
-    //   });
-    //   const data = await response.json();
-    //   console.log(data);
-  
-    //   if (data && data.display_name) {
-    //     // data.display_name typically contains a very specific description (e.g., "Empire State Building, 350, 5th Avenue, ...")
-    //     return data.display_name;
-    //   }
-    // } catch (error) {
-    //   console.error("Error during reverse geocoding:", error);
-    // }
-  
-    // Fallback to a simple lat/lon string if reverse geocoding fails.
-    return `Lat: ${latitude.toFixed(2)}, Lon: ${longitude.toFixed(2)}`;
+  /**
+   * Schedules a notification with the provided message.
+   */
+  async function sendNotification(message: string) {
+    await Notifications.scheduleNotificationAsync({
+      content: { title: 'Location Alert', body: message },
+      trigger: null,
+    });
   }
-  
+
   /**
    * Loads a batch of photos from the media library and appends those that
    * have location metadata near the provided location.
    */
   async function loadMorePhotos(coords: Coords) {
-    // If there's no more data to load, return early.
     if (!hasNextPage && endCursor) return;
     if (loadingMore) return;
 
     setLoadingMore(true);
 
     try {
-      // Fetch a batch of photos (e.g., 100 photos)
+      // Fetch a batch of photos (e.g., 10 photos)
       const mediaResult = await MediaLibrary.getAssetsAsync({
         mediaType: 'photo',
         first: 10,
@@ -146,20 +143,17 @@ export default function PhotoGallery() {
       setEndCursor(mediaResult.endCursor);
       setHasNextPage(mediaResult.hasNextPage);
 
-      // Process each asset sequentially
+      // Process each asset
       const newPhotos: Photo[] = [];
       for (const asset of mediaResult.assets) {
         let assetInfo: ExtendedAsset;
         if (assetCache.current.has(asset.id)) {
-          // We know this value exists, so use the non-null assertion.
           assetInfo = assetCache.current.get(asset.id)!;
         } else {
-          // Cast the result as ExtendedAsset so that TS knows location exists (if provided).
           assetInfo = (await MediaLibrary.getAssetInfoAsync(asset.id)) as ExtendedAsset;
           assetCache.current.set(asset.id, assetInfo);
         }
 
-        // Check that assetInfo exists and has a location property.
         if (assetInfo && assetInfo.location) {
           // Only include photos with location metadata near the current location.
           if (
@@ -191,13 +185,96 @@ export default function PhotoGallery() {
     }
   }
 
-  const renderPhoto = ({ item }: { item: Photo }) => (
-    <View style={styles.photoContainer}>
-      <Text style={styles.locationText}>{formatLocation(item.location)}</Text>
-      <Image source={{ uri: item.uri }} style={styles.image} />
-    </View>
-  );
+  // On mount: request permissions, fetch the current location, send a notification, and load photos.
+  useEffect(() => {
+    (async () => {
+      // Request location permission
+      const { status: locStatus } = await Location.requestForegroundPermissionsAsync();
+      if (locStatus !== 'granted') {
+        Alert.alert('Permission denied', 'Location permission is required.');
+        return;
+      }
+      // Request media library permission
+      const { status: mediaStatus } = await MediaLibrary.requestPermissionsAsync();
+      if (mediaStatus !== 'granted') {
+        Alert.alert('Permission denied', 'Media library access is required.');
+        return;
+      }
 
+      // Get current location
+      const locResult = await Location.getCurrentPositionAsync({});
+      const coords = locResult.coords;
+      setCurrentLocation(coords);
+
+      // Reverse geocode the current location for notification text.
+      const locationName = await formatLocation(coords);
+
+      // Check if this location was visited before.
+      const alreadyVisited = visitedLocations.some((prev) => isSameLocation(prev, coords, 0.01));
+      if (alreadyVisited) {
+        sendNotification(`You're at ${locationName}! Remember this moment?`);
+      } else {
+        sendNotification(`You're at ${locationName}! Capture the moment?`);
+        setVisitedLocations((prev) => [...prev, coords]);
+      }
+
+      // Load the first batch of photos.
+      await loadMorePhotos(coords);
+      setLoading(false);
+    })();
+  }, []);
+
+  // --- Components for displaying reverse geocoded text ---
+
+  /**
+   * Component that displays the current location with a reverse geocoded string.
+   */
+  const CurrentLocationText = ({ coords }: { coords: Coords }) => {
+    const [locationName, setLocationName] = useState<string>('Loading location...');
+    useEffect(() => {
+      let isMounted = true;
+      async function fetchLocation() {
+        const name = await formatLocation(coords);
+        if (isMounted) setLocationName(name);
+      }
+      fetchLocation();
+      return () => {
+        isMounted = false;
+      };
+    }, [coords]);
+    return <Text style={styles.header}>Current Location: {locationName}</Text>;
+  };
+
+  /**
+   * Component that renders an individual photo along with its reverse geocoded location.
+   */
+  const PhotoItem = ({ photo }: { photo: Photo }) => {
+    const [locationName, setLocationName] = useState<string>('Loading location...');
+    useEffect(() => {
+      let isMounted = true;
+      async function fetchLocation() {
+        const name = await formatLocation(photo.location);
+        if (isMounted) setLocationName(name);
+      }
+      fetchLocation();
+      return () => {
+        isMounted = false;
+      };
+    }, [photo.location]);
+    return (
+      <View style={styles.photoContainer}>
+        <Text style={styles.locationText}>{locationName}</Text>
+        <Image source={{ uri: photo.uri }} style={styles.image} />
+      </View>
+    );
+  };
+
+  // Render function for the FlatList.
+  const renderPhoto = ({ item }: { item: Photo }) => <PhotoItem photo={item} />;
+
+  /**
+   * Called when the end of the FlatList is reached to load more photos.
+   */
   const handleEndReached = () => {
     if (currentLocation && hasNextPage) {
       loadMorePhotos(currentLocation);
@@ -206,11 +283,11 @@ export default function PhotoGallery() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.header}>
-        {currentLocation
-          ? `Current Location: ${formatLocation(currentLocation)}`
-          : 'Fetching location...'}
-      </Text>
+      {currentLocation ? (
+        <CurrentLocationText coords={currentLocation} />
+      ) : (
+        <Text style={styles.header}>Fetching location...</Text>
+      )}
       {loading ? (
         <ActivityIndicator size="large" color="#0000ff" />
       ) : photos.length === 0 ? (
