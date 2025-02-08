@@ -54,7 +54,7 @@ export default function PhotoGallery() {
       // Get recent photos from media library
       const mediaResult = await MediaLibrary.getAssetsAsync({
         mediaType: 'photo',
-        first: 100,
+        first: 50,
       });
 
       // Fetch AssetInfo for each asset to get location metadata
@@ -102,7 +102,7 @@ export default function PhotoGallery() {
 
   // Format coordinates into a simple string representation
   function formatLocation(coords: Coords): string {
-    return `Lat: ${coords.latitude.toFixed(2)}, Lon: ${coords.longitude.toFixed(2)}`;
+    return `Lat: ${coords.latitude}, Lon: ${coords.longitude}`;
   }
 
   const renderPhoto = ({ item }: { item: Photo }) => (
