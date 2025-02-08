@@ -1,10 +1,29 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, FlatList, Image, StyleSheet, Alert } from 'react-native';
+import React, { useEffect, useState, useRef } from 'react';
+import { 
+  View, 
+  Text, 
+  FlatList, 
+  Image, 
+  StyleSheet, 
+  Alert, 
+  ActivityIndicator 
+} from 'react-native';
 import * as Location from 'expo-location';
 import * as MediaLibrary from 'expo-media-library';
 import * as Notifications from 'expo-notifications';
 
-// Type definitions
+// Extend the built-in type so that we can access location and localUri.
+interface ExtendedAsset extends MediaLibrary.Asset {
+  // These properties are optional since not every asset may have them.
+  location?: {
+    latitude: number;
+    longitude: number;
+    altitude?: number;
+  };
+  localUri?: string;
+}
+
+// Type definitions for our app
 type Coords = { 
   latitude: number; 
   longitude: number; 
@@ -20,6 +39,14 @@ export default function PhotoGallery() {
   const [currentLocation, setCurrentLocation] = useState<Coords | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [visitedLocations, setVisitedLocations] = useState<Coords[]>([]);
+  const [endCursor, setEndCursor] = useState<string | null>(null);
+  const [hasNextPage, setHasNextPage] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [loadingMore, setLoadingMore] = useState<boolean>(false);
+
+  // Create an in-memory cache for asset info.
+  // We now store ExtendedAsset objects, which include location/localUri.
+  const assetCache = useRef<Map<string, ExtendedAsset>>(new Map());
 
   useEffect(() => {
     (async () => {
@@ -29,7 +56,6 @@ export default function PhotoGallery() {
         Alert.alert('Permission denied', 'Location permission is required.');
         return;
       }
-
       // Request media library permission
       const { status: mediaStatus } = await MediaLibrary.requestPermissionsAsync();
       if (mediaStatus !== 'granted') {
@@ -51,39 +77,11 @@ export default function PhotoGallery() {
         setVisitedLocations((prev) => [...prev, coords]);
       }
 
-      // Get recent photos from media library
-      const mediaResult = await MediaLibrary.getAssetsAsync({
-        mediaType: 'photo',
-        first: 50,
-      });
-
-      // Fetch AssetInfo for each asset to get location metadata
-      const photoPromises = mediaResult.assets.map(async (asset) => {
-        const assetInfo = await MediaLibrary.getAssetInfoAsync(asset.id);
-        if (assetInfo.location) {
-          return {
-            id: assetInfo.id,
-            uri: assetInfo.localUri || assetInfo.uri,
-            location: {
-              latitude: assetInfo.location.latitude,
-              longitude: assetInfo.location.longitude,
-            },
-          };
-        }
-        return null;
-      });
-
-      // Wait for all promises to resolve
-      const resolvedPhotos = await Promise.all(photoPromises);
-
-      // Filter only photos with location metadata near the current location
-      const filteredPhotos = resolvedPhotos.filter(
-        (photo) => photo && isSameLocation(photo.location, coords, 0.05)
-      ) as Photo[];
-
-      setPhotos(filteredPhotos);
+      // Load the first batch of photos
+      await loadMorePhotos(coords);
+      setLoading(false);
     })();
-  }, [visitedLocations]);
+  }, []);
 
   async function sendNotification(message: string) {
     await Notifications.scheduleNotificationAsync({
@@ -92,7 +90,7 @@ export default function PhotoGallery() {
     });
   }
 
-  // Compare two coordinates with a simple threshold
+  // Simple location comparison using a threshold
   function isSameLocation(a: Coords, b: Coords, threshold: number): boolean {
     return (
       Math.abs(a.latitude - b.latitude) < threshold &&
@@ -100,9 +98,77 @@ export default function PhotoGallery() {
     );
   }
 
-  // Format coordinates into a simple string representation
+  // Format coordinates for display
   function formatLocation(coords: Coords): string {
-    return `Lat: ${coords.latitude}, Lon: ${coords.longitude}`;
+    return `Lat: ${Number(coords.latitude).toFixed(2)}, Lon: ${Number(coords.longitude).toFixed(2)}`;
+  }
+
+  /**
+   * Loads a batch of photos from the media library and appends those that
+   * have location metadata near the provided location.
+   */
+  async function loadMorePhotos(coords: Coords) {
+    // If there's no more data to load, return early.
+    if (!hasNextPage && endCursor) return;
+    if (loadingMore) return;
+
+    setLoadingMore(true);
+
+    try {
+      // Fetch a batch of photos (e.g., 100 photos)
+      const mediaResult = await MediaLibrary.getAssetsAsync({
+        mediaType: 'photo',
+        first: 100,
+        after: endCursor || undefined,
+      });
+
+      // Update pagination state
+      setEndCursor(mediaResult.endCursor);
+      setHasNextPage(mediaResult.hasNextPage);
+
+      // Process each asset sequentially
+      const newPhotos: Photo[] = [];
+      for (const asset of mediaResult.assets) {
+        let assetInfo: ExtendedAsset;
+        if (assetCache.current.has(asset.id)) {
+          // We know this value exists, so use the non-null assertion.
+          assetInfo = assetCache.current.get(asset.id)!;
+        } else {
+          // Cast the result as ExtendedAsset so that TS knows location exists (if provided).
+          assetInfo = (await MediaLibrary.getAssetInfoAsync(asset.id)) as ExtendedAsset;
+          assetCache.current.set(asset.id, assetInfo);
+        }
+
+        // Check that assetInfo exists and has a location property.
+        if (assetInfo && assetInfo.location) {
+          // Only include photos with location metadata near the current location.
+          if (
+            isSameLocation(
+              {
+                latitude: assetInfo.location.latitude,
+                longitude: assetInfo.location.longitude,
+              },
+              coords,
+              0.05
+            )
+          ) {
+            newPhotos.push({
+              id: assetInfo.id,
+              uri: assetInfo.localUri || assetInfo.uri,
+              location: {
+                latitude: assetInfo.location.latitude,
+                longitude: assetInfo.location.longitude,
+              },
+            });
+          }
+        }
+      }
+      setPhotos((prevPhotos) => [...prevPhotos, ...newPhotos]);
+    } catch (error) {
+      console.error('Error loading more photos', error);
+    } finally {
+      setLoadingMore(false);
+    }
   }
 
   const renderPhoto = ({ item }: { item: Photo }) => (
@@ -112,15 +178,34 @@ export default function PhotoGallery() {
     </View>
   );
 
+  const handleEndReached = () => {
+    if (currentLocation && hasNextPage) {
+      loadMorePhotos(currentLocation);
+    }
+  };
+
   return (
     <View style={styles.container}>
       <Text style={styles.header}>
-        {currentLocation ? `Current Location: ${formatLocation(currentLocation)}` : 'Fetching location...'}
+        {currentLocation
+          ? `Current Location: ${formatLocation(currentLocation)}`
+          : 'Fetching location...'}
       </Text>
-      {photos.length === 0 ? (
+      {loading ? (
+        <ActivityIndicator size="large" color="#0000ff" />
+      ) : photos.length === 0 ? (
         <Text style={styles.message}>No photos found for this location.</Text>
       ) : (
-        <FlatList data={photos} renderItem={renderPhoto} keyExtractor={(item) => item.id} />
+        <FlatList
+          data={photos}
+          renderItem={renderPhoto}
+          keyExtractor={(item) => item.id}
+          onEndReached={handleEndReached}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={
+            loadingMore ? <ActivityIndicator size="small" color="#0000ff" /> : null
+          }
+        />
       )}
     </View>
   );
