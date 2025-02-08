@@ -1,25 +1,19 @@
 import React, { useEffect, useState } from 'react';
-import { View, ActivityIndicator, StyleSheet, Alert } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Alert, Image, TouchableOpacity, Modal } from 'react-native';
 import MapView, { Marker, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
 import * as MediaLibrary from 'expo-media-library';
 
 // Type Definitions
-type Coords = { 
-  latitude: number; 
-  longitude: number; 
-};
-
-type Photo = {
-  id: string;
-  uri: string;
-  location: Coords;
-};
+type Coords = { latitude: number; longitude: number };
+type Photo = { id: string; uri: string; location: Coords };
 
 export default function MapScreen() {
   const [currentLocation, setCurrentLocation] = useState<Region | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null); // Stores tapped photo
+  const [modalVisible, setModalVisible] = useState(false); // Controls full-screen modal
 
   useEffect(() => {
     (async () => {
@@ -96,35 +90,95 @@ export default function MapScreen() {
   }
 
   return (
-    <MapView
-      style={styles.map}
-      initialRegion={currentLocation || {
-        latitude: 37.7749, // Default to San Francisco if location is unavailable
-        longitude: -122.4194,
-        latitudeDelta: 0.05,
-        longitudeDelta: 0.05,
-      }}
-      showsUserLocation={true}
-    >
-      {photos.map((photo) => (
-        <Marker
-          key={photo.id}
-          coordinate={{ latitude: photo.location.latitude, longitude: photo.location.longitude }}
-          title="Photo Location"
-          description="A memory captured here"
-        />
-      ))}
-    </MapView>
+    <View style={styles.container}>
+      {/* Map View */}
+      <MapView
+        style={styles.map}
+        initialRegion={currentLocation || {
+          latitude: 37.7749, // Default to San Francisco if location is unavailable
+          longitude: -122.4194,
+          latitudeDelta: 0.05,
+          longitudeDelta: 0.05,
+        }}
+        showsUserLocation={true}
+      >
+        {photos.map((photo) => (
+          <Marker
+            key={photo.id}
+            coordinate={{ latitude: photo.location.latitude, longitude: photo.location.longitude }}
+            onPress={() => setSelectedPhoto(photo)}
+          />
+        ))}
+      </MapView>
+
+      {/* Photo Preview (Shows when a marker is tapped) */}
+      {selectedPhoto && (
+        <View style={styles.previewContainer}>
+          <TouchableOpacity onPress={() => setModalVisible(true)}>
+            <Image source={{ uri: selectedPhoto.uri }} style={styles.previewImage} />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Full-Screen Image Modal */}
+      <Modal visible={modalVisible} transparent={true} animationType="fade">
+        <View style={styles.modalContainer}>
+          <TouchableOpacity style={styles.closeButton} onPress={() => setModalVisible(false)}>
+            <Image source={{ uri: selectedPhoto?.uri }} style={styles.fullImage} />
+          </TouchableOpacity>
+        </View>
+      </Modal>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  map: {
-    flex: 1,
-  },
+  container: { flex: 1 },
+  map: { flex: 1 },
+
+  // Loader
   loaderContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+
+  // Photo Preview (small image)
+  previewContainer: {
+    position: 'absolute',
+    bottom: 20,
+    alignSelf: 'center',
+    backgroundColor: 'white',
+    padding: 10,
+    borderRadius: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  previewImage: {
+    width: 120,
+    height: 120,
+    borderRadius: 8,
+  },
+
+  // Full-Screen Modal
+  modalContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  closeButton: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullImage: {
+    width: '90%',
+    height: '90%',
+    resizeMode: 'contain',
   },
 });
