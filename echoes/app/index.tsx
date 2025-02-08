@@ -98,11 +98,31 @@ export default function PhotoGallery() {
     );
   }
 
-  // Format coordinates for display
-  function formatLocation(coords: Coords): string {
-    return `Lat: ${Number(coords.latitude).toFixed(2)}, Lon: ${Number(coords.longitude).toFixed(2)}`;
+  async function formatLocation(coords: Coords): Promise<string> {
+    const { latitude, longitude } = coords;
+    // The "zoom" parameter controls the detail level (18 is very detailed).
+    // const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`;
+    
+    // try {
+    //   const response = await fetch(url, {
+    //     // It's good practice to include a valid User-Agent string per Nominatim's policy.
+    //     headers: { 'User-Agent': 'YourAppName/1.0 (your-email@example.com)' }
+    //   });
+    //   const data = await response.json();
+    //   console.log(data);
+  
+    //   if (data && data.display_name) {
+    //     // data.display_name typically contains a very specific description (e.g., "Empire State Building, 350, 5th Avenue, ...")
+    //     return data.display_name;
+    //   }
+    // } catch (error) {
+    //   console.error("Error during reverse geocoding:", error);
+    // }
+  
+    // Fallback to a simple lat/lon string if reverse geocoding fails.
+    return `Lat: ${latitude.toFixed(2)}, Lon: ${longitude.toFixed(2)}`;
   }
-
+  
   /**
    * Loads a batch of photos from the media library and appends those that
    * have location metadata near the provided location.
@@ -118,7 +138,7 @@ export default function PhotoGallery() {
       // Fetch a batch of photos (e.g., 100 photos)
       const mediaResult = await MediaLibrary.getAssetsAsync({
         mediaType: 'photo',
-        first: 100,
+        first: 10,
         after: endCursor || undefined,
       });
 
