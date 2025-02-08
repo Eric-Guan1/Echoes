@@ -1,5 +1,5 @@
-import Navigator from './navigation/Navigator';
+import PhotoGallery from './screens/GalleryScreen';
 
 export default function App() {
-  return <Navigator />;
+  return <PhotoGallery />;
 }

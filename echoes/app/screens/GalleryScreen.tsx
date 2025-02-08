@@ -120,7 +120,7 @@ export default function PhotoGallery() {
     // }
   
     // Fallback to a simple lat/lon string if reverse geocoding fails.
-    return `Lat: ${latitude.toFixed(2)}, Lon: ${longitude.toFixed(2)}`;
+    return `Lat: ${Number(latitude).toFixed(2)}, Lon: ${Number(longitude).toFixed(2)}`;
   }
   
   /**
