@@ -36,11 +36,11 @@ const Logo = () => (
 function HeaderTitle() {
   return (
     <View style={styles.headerContainer}>
-      <Logo />
-      {/* <Image
+      {/* <Logo /> */}
+      <Image
         style={styles.logo}
-        source={require("../assets/images/logo.png")}
-      /> */}
+        source={require("../assets/images/logo1.png")}
+      />
       <Text style={styles.title}>echoes</Text>
     </View>
   );
@@ -67,13 +67,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   logo: {
-    width: 10,
-    height: 10,
+    width: 30,
+    height: 30,
     resizeMode: "contain",
-    marginRight: 8, // A touch of space between the logo and text
+    marginRight: 0, // A touch of space between the logo and text
   },
   title: {
-    marginLeft: 8,
+    marginLeft: 3,
     fontSize: 24,
     fontWeight: "700",
     color: "#1D1D1F", // A refined, dark tone for crisp legibility
