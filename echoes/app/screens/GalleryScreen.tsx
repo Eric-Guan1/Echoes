@@ -321,7 +321,7 @@ export default function PhotoGallery() {
             !isSameLocation(
               { latitude: assetInfo.location.latitude, longitude: assetInfo.location.longitude },
               coords,
-              0.05
+              0.001
             )
           ) {
             return null;
