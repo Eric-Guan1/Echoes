@@ -523,3 +523,10 @@ const styles = StyleSheet.create({
     fontSize: 18,
   },
 });
+
+
+
+[MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video]
+
+
+
