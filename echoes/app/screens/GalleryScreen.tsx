@@ -281,7 +281,7 @@ export default function PhotoGallery() {
                 longitude: assetInfo.location.longitude,
               },
               coords,
-              0.05
+              0.001
             )
           ) {
             newPhotos.push({
