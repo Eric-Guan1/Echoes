@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigation } from "expo-router";
 import {
   View,
   Text,
@@ -8,6 +9,7 @@ import {
   Image,
   Modal,
   ScrollView,
+  Platform,
 } from 'react-native';
 import { Camera, CameraView } from 'expo-camera';
 import * as Location from 'expo-location';
@@ -78,6 +80,11 @@ export default function ARScreen() {
   const [photos, setPhotos] = useState<PhotoMarker[]>([]);
   const [heading, setHeading] = useState(0);
   const [selectedPhoto, setSelectedPhoto] = useState<PhotoMarker | null>(null);
+  const navigation = useNavigation();
+
+  useEffect(() => {
+    navigation.setOptions({ headerShown: false }); // Remove the title
+  }, [navigation]);
 
   // Request permissions and load photos once.
   useEffect(() => {
@@ -149,7 +156,6 @@ export default function ARScreen() {
           distanceInterval: 0,
         },
         (loc) => {
-          console.log('Location update:', loc.coords);
           setLocation(loc.coords);
         }
       );
@@ -213,11 +219,16 @@ export default function ARScreen() {
           key={photo.id}
           style={[
             styles.markerContainer,
-            { left: xPos - 25, top: yPos, transform: [{ scale }, { perspective: 1000 }] },
+            {
+              left: xPos - 25,
+              top: yPos,
+              transform: [{ scale }, { perspective: 1000 }],
+            },
           ]}
           onPress={() => setSelectedPhoto(photo)}
+          activeOpacity={0.8}
         >
-          <Text style={styles.distanceText}>{Math.round(dynamicDistance)} m</Text>
+          <Text style={styles.markerDistanceText}>{Math.round(dynamicDistance)} m</Text>
           <View style={styles.marker}>
             <Image source={{ uri: photo.uri }} style={styles.markerImage} />
           </View>
@@ -242,7 +253,7 @@ export default function ARScreen() {
   if (Object.values(hasPermissions).some((status) => status === false)) {
     return (
       <View style={styles.centered}>
-        <Text>Required permissions not granted</Text>
+        <Text style={styles.errorText}>Required permissions not granted</Text>
       </View>
     );
   }
@@ -251,14 +262,12 @@ export default function ARScreen() {
     <View style={styles.container}>
       <CameraView style={styles.camera}>
         {renderMarkers()}
-        <View style={styles.compass}>
+        <View style={styles.compassContainer}>
           <Text style={styles.compassText}>{Math.round(heading)}°</Text>
-          <Text style={styles.compassText}>{location?.latitude}</Text>
-          <Text style={styles.compassText}>{location?.longitude}</Text>
         </View>
       </CameraView>
 
-      {/* Render the "Close By" scrollable list if any photos are nearby */}
+      {/* "Close By" Photos List */}
       {closeByPhotos.length > 0 && (
         <View style={styles.closeByContainer}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -267,6 +276,7 @@ export default function ARScreen() {
                 key={photo.id}
                 onPress={() => setSelectedPhoto(photo)}
                 style={styles.closeByItem}
+                activeOpacity={0.8}
               >
                 <Image source={{ uri: photo.uri }} style={styles.closeByPhoto} />
                 <Text style={styles.closeByDistanceText}>
@@ -286,8 +296,9 @@ export default function ARScreen() {
         </View>
       )}
 
+      {/* Modal to display selected photo */}
       {selectedPhoto && (
-        <Modal visible={true} transparent={true}>
+        <Modal visible={true} transparent animationType="fade">
           <TouchableOpacity
             style={styles.modalContainer}
             onPress={() => setSelectedPhoto(null)}
@@ -308,85 +319,105 @@ export default function ARScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#000', // Ensures a clean, dark background
   },
   camera: {
     flex: 1,
   },
   centered: {
     flex: 1,
+    backgroundColor: '#000',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  errorText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
   },
   markerContainer: {
     position: 'absolute',
     alignItems: 'center',
+    // A subtle shadow for depth
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: Platform.OS === 'android' ? 0.5 : 0.3,
+    shadowRadius: 3,
+    elevation: 5,
+  },
+  markerDistanceText: {
+    color: '#fff',
+    fontSize: 12,
+    marginBottom: 4,
+    textShadowColor: 'rgba(0, 0, 0, 0.7)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
   marker: {
     width: 50,
     height: 50,
     borderRadius: 25,
-    borderWidth: 2,
+    borderWidth: 1,
     borderColor: '#fff',
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
     overflow: 'hidden',
-    backgroundColor: '#00000090',
   },
   markerImage: {
     width: '100%',
     height: '100%',
   },
-  distanceText: {
-    color: 'white',
-    fontSize: 12,
-    marginBottom: 2,
-    textShadowColor: 'rgba(0, 0, 0, 0.75)',
-    textShadowOffset: { width: -1, height: 1 },
-    textShadowRadius: 10,
-  },
-  compass: {
+  compassContainer: {
     position: 'absolute',
-    top: 50,
+    top: 40,
     right: 20,
-    backgroundColor: '#00000080',
-    padding: 10,
-    borderRadius: 20,
-  },
-  compassText: {
-    color: 'white',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  modalContainer: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.9)',
-    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 15,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
     alignItems: 'center',
   },
-  modalImage: {
-    width: SCREEN_WIDTH,
-    height: SCREEN_HEIGHT,
+  compassText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginVertical: 2,
   },
   closeByContainer: {
     position: 'absolute',
-    bottom: 20,
+    bottom: 30,
     left: 0,
     right: 0,
-    paddingHorizontal: 10,
+    paddingHorizontal: 15,
   },
   closeByItem: {
     alignItems: 'center',
-    marginRight: 10,
+    marginRight: 15,
   },
   closeByPhoto: {
     width: 80,
     height: 80,
     borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#fff',
   },
   closeByDistanceText: {
-    color: 'white',
+    color: '#fff',
     fontSize: 12,
-    marginTop: 4,
-    textShadowColor: 'rgba(0, 0, 0, 0.75)',
-    textShadowOffset: { width: -1, height: 1 },
-    textShadowRadius: 10,
+    marginTop: 6,
+    textShadowColor: 'rgba(0, 0, 0, 0.6)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalImage: {
+    width: SCREEN_WIDTH * 0.95,
+    height: SCREEN_HEIGHT * 0.95,
   },
 });
+
+export { ARScreen };

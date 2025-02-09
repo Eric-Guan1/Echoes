@@ -1,11 +1,47 @@
 import { Stack } from "expo-router/stack";
-import { View, StyleSheet, StatusBar, Platform, Image, Text } from "react-native";
+import { View, StyleSheet, StatusBar, Image, Text } from "react-native";
+import Svg, {
+  Circle,
+  Defs,
+  LinearGradient,
+  Stop,
+  Text as SvgText,
+} from 'react-native-svg';
 
-function Padding() {
+
+const Logo = () => (
+  <Svg width="30" height="30" viewBox="0 0 50 50">
+    <Defs>
+      <LinearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
+        <Stop offset="0%" stopColor="#007AFF" />
+        <Stop offset="100%" stopColor="#34C759" />
+      </LinearGradient>
+    </Defs>
+    {/* Circular background with a gradient fill */}
+    <Circle cx="25" cy="25" r="25" fill="url(#grad)" />
+    {/* The letter "e" centered in the circle */}
+    <SvgText
+      x="25"
+      y="33"
+      fill="#FFF"
+      fontSize="24"
+      fontWeight="bold"
+      textAnchor="middle"
+    >
+      e
+    </SvgText>
+  </Svg>
+);
+
+function HeaderTitle() {
   return (
-    <View style={styles.container}>
-      <Image style={styles.image} source={require('../assets/images/logo.png')} />
-      <Text style={styles.text}>echoes</Text>
+    <View style={styles.headerContainer}>
+      <Logo />
+      {/* <Image
+        style={styles.logo}
+        source={require("../assets/images/logo.png")}
+      /> */}
+      <Text style={styles.title}>echoes</Text>
     </View>
   );
 }
@@ -13,17 +49,12 @@ function Padding() {
 export default function RootLayout() {
   return (
     <>
-      {/* Ensure the status bar is visible */}
+      {/* Ensure the status bar is visible with dark content */}
       <StatusBar barStyle="dark-content" />
-
       <Stack
         screenOptions={{
-          headerTransparent: false, // Ensures header doesn't hide the status bar
-          headerTitle: () => <Padding />,
-          // headerTitleStyle: {
-          //   marginTop: 100,
-          //   padding: 100,
-          // },
+          headerTransparent: false, // Header is opaque
+          headerTitle: () => <HeaderTitle />,
         }}
       />
     </>
@@ -31,23 +62,20 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
-  image: {
-    width: 30,
-    height: 30,
+  headerContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  logo: {
+    width: 10,
+    height: 10,
     resizeMode: "contain",
+    marginRight: 8, // A touch of space between the logo and text
   },
-  container: {
-    flexDirection: 'row', // Align items in a row
-    alignItems: 'left', // Center vertically
-  },
-  image: {
-    width: 30,  // Adjust size as needed
-    height: 30, // Adjust size as needed
-    marginRight: 10, // Space between image and text
-  },
-  text: {
+  title: {
+    marginLeft: 8,
     fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333', // Adjust color as needed
+    fontWeight: "700",
+    color: "#1D1D1F", // A refined, dark tone for crisp legibility
   },
 });
