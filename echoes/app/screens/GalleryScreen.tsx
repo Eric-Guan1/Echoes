@@ -13,14 +13,15 @@ import {
   Dimensions,
 } from 'react-native';
 import * as Location from 'expo-location';
-import { BlurView } from 'expo-blur';
 import * as MediaLibrary from 'expo-media-library';
 import * as Notifications from 'expo-notifications';
-import { useNavigation } from "expo-router";
+import { useNavigation } from 'expo-router';
+import { Video } from 'expo-av';
+import * as VideoThumbnails from 'expo-video-thumbnails';
+import * as FileSystem from 'expo-file-system';
 
 // Extend the built-in type so that we can access location and localUri.
 interface ExtendedAsset extends MediaLibrary.Asset {
-  // Not every asset will have these properties.
   location?: {
     latitude: number;
     longitude: number;
@@ -35,11 +36,33 @@ type Coords = {
   longitude: number;
 };
 
+// Updated type for a media asset (photo or video).
+// For video items we add an optional thumbnailUri and duration (in seconds).
 export type Photo = {
   id: string;
-  uri: string;
+  uri: string; // For playback or full image.
   location: Coords;
+  mediaType: 'photo' | 'video';
+  thumbnailUri?: string; // Only set for video assets.
+  duration?: number; // Video duration in seconds.
 };
+
+/**
+ * Copies a file (in this case, a video) to the app's cache directory so that it becomes accessible.
+ */
+async function copyVideoToCache(uri: string): Promise<string> {
+  const fileName = uri.split('/').pop();
+  if (!fileName) throw new Error('Could not determine file name');
+  const dest = FileSystem.cacheDirectory + fileName;
+  const fileInfo = await FileSystem.getInfoAsync(dest);
+  if (!fileInfo.exists) {
+    await FileSystem.copyAsync({
+      from: uri,
+      to: dest,
+    });
+  }
+  return dest;
+}
 
 /**
  * Helper function that wraps fetch with a timeout using AbortController.
@@ -48,10 +71,9 @@ async function fetchWithTimeout(
   resource: RequestInfo,
   options: RequestInit & { timeout?: number } = {}
 ): Promise<Response> {
-  const { timeout = 10000 } = options; // Default timeout: 10 seconds.
+  const { timeout = 10000 } = options;
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeout);
-
   try {
     const response = await fetch(resource, {
       ...options,
@@ -70,10 +92,8 @@ async function fetchWithTimeout(
 async function formatLocation(coords: Coords): Promise<string> {
   const { latitude, longitude } = coords;
   const MAPBOX_API_KEY =
-    'pk.eyJ1IjoiZGFuaWVsc3VoMDUiLCJhIjoiY2x4MjJzcTBhMGd0MzJpc2Y0amw5M3I0dSJ9.Uwf4qdHJzCqtCY7B6m-r5Q'; // <-- Replace with your Mapbox token.
-  // Mapbox expects coordinates as longitude,latitude.
+    'pk.eyJ1IjoiZGFuaWVsc3VoMDUiLCJhIjoiY2x4MjJzcTBhMGd0MzJpc2Y0amw5M3I0dSJ9.Uwf4qdHJzCqtCY7B6m-r5Q'; // <-- Replace with your token.
   const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${longitude},${latitude}.json?access_token=${MAPBOX_API_KEY}&limit=1`;
-
   try {
     const response = await fetchWithTimeout(url, { timeout: 15000 });
     const data = await response.json();
@@ -83,13 +103,11 @@ async function formatLocation(coords: Coords): Promise<string> {
   } catch (error) {
     console.error('Error during reverse geocoding:', error);
   }
-  // Fallback: return a simple latitude/longitude string.
   return `Lat: ${Number(latitude).toFixed(2)}, Lon: ${Number(longitude).toFixed(2)}`;
 }
 
 /**
- * A simple function to compare two locations.
- * Returns true if the difference in latitude and longitude is below the threshold.
+ * Compares two locations; returns true if they are within a given threshold.
  */
 function isSameLocation(a: Coords, b: Coords, threshold: number): boolean {
   return (
@@ -109,8 +127,16 @@ async function sendNotification(message: string) {
 }
 
 /**
+ * Helper function to format a duration (in seconds) to a "mm:ss" string.
+ */
+function formatDuration(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${minutes}:${secs < 10 ? '0' : ''}${secs}`;
+}
+
+/**
  * Header component that shows the current location using reverse geocoding.
- * Wrapped in React.memo so it only re-renders when its own props change.
  */
 const CurrentLocationText = React.memo(({ coords }: { coords: Coords }) => {
   const [locationName, setLocationName] = useState<string>('Loading location...');
@@ -121,72 +147,60 @@ const CurrentLocationText = React.memo(({ coords }: { coords: Coords }) => {
       if (isMounted) setLocationName(name);
     }
     fetchLocation();
-    return () => {
-      isMounted = false;
-    };
+    return () => { isMounted = false; };
   }, [coords]);
-
   return <Text style={styles.header}>Current Location: {locationName}</Text>;
 });
 
 /**
- * Component that renders an individual photo.
- * It is wrapped in a TouchableOpacity so that tapping it calls the onPress callback.
+ * Component that renders an individual media item (photo or video).
+ * For video items, we display the generated thumbnail (or fallback to the uri)
+ * and overlay both a play icon at the top left and the video duration at the bottom right.
  */
-const PhotoItem = React.memo(
-  ({
-    photo,
-    onPress,
-  }: {
-    photo: Photo;
-    onPress: (photo: Photo) => void;
-  }) => {
-    return (
-      <TouchableOpacity onPress={() => onPress(photo)} style={styles.photoContainer}>
-        <Image source={{ uri: photo.uri }} style={styles.image} />
-      </TouchableOpacity>
-    );
-  }
-);
+const PhotoItem = React.memo(({ photo, onPress }: { photo: Photo; onPress: (photo: Photo) => void; }) => {
+  const imageUri = photo.mediaType === 'video' ? photo.thumbnailUri || photo.uri : photo.uri;
+  return (
+    <TouchableOpacity onPress={() => onPress(photo)} style={styles.photoContainer}>
+      <Image source={{ uri: imageUri }} style={styles.image} />
+      {photo.mediaType === 'video' && (
+        <>
+          <View style={styles.videoIconOverlay}>
+            <Text style={styles.videoIconText}>▶</Text>
+          </View>
+          {photo.duration !== undefined && (
+            <View style={styles.videoDurationOverlay}>
+              <Text style={styles.videoDurationText}>{formatDuration(photo.duration)}</Text>
+            </View>
+          )}
+        </>
+      )}
+    </TouchableOpacity>
+  );
+});
 
 /**
- * PhotoList component that renders the grid of photos.
+ * Component that renders the grid of media items.
  */
-const PhotoList = React.memo(
-  ({
-    photos,
-    onEndReached,
-    loadingMore,
-    onPhotoPress,
-  }: {
-    photos: Photo[];
-    onEndReached: () => void;
-    loadingMore: boolean;
-    onPhotoPress: (photo: Photo) => void;
-  }) => {
-    const renderItem = useCallback(
-      ({ item }: { item: Photo }) => {
-        return <PhotoItem photo={item} onPress={onPhotoPress} />;
-      },
-      [onPhotoPress]
-    );
-
-    return (
-      <FlatList
-        data={photos}
-        renderItem={renderItem}
-        keyExtractor={(item) => item.id}
-        onEndReached={onEndReached}
-        onEndReachedThreshold={0.5}
-        ListFooterComponent={
-          loadingMore ? <ActivityIndicator size="small" color="#0000ff" style={{ margin: 20 }} /> : null
-        }
-        numColumns={3}
-        contentContainerStyle={styles.photoListContainer}
-      />
-    );
-  }
-);
+const PhotoList = React.memo(({ photos, onEndReached, loadingMore, onPhotoPress, }: {
+  photos: Photo[];
+  onEndReached: () => void;
+  loadingMore: boolean;
+  onPhotoPress: (photo: Photo) => void;
+}) => {
+  const renderItem = useCallback(({ item }: { item: Photo }) => <PhotoItem photo={item} onPress={onPhotoPress} />, [onPhotoPress]);
+  return (
+    <FlatList
+      data={photos}
+      renderItem={renderItem}
+      keyExtractor={(item) => item.id}
+      onEndReached={onEndReached}
+      onEndReachedThreshold={0.5}
+      ListFooterComponent={loadingMore ? (<ActivityIndicator size="small" color="#0000ff" style={{ margin: 20 }} />) : null}
+      numColumns={3}
+      contentContainerStyle={styles.photoListContainer}
+    />
+  );
+});
 
 /**
  * The main PhotoGallery component.
@@ -195,107 +209,163 @@ export default function PhotoGallery() {
   const [currentLocation, setCurrentLocation] = useState<Coords | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [visitedLocations, setVisitedLocations] = useState<Coords[]>([]);
-  const [endCursor, setEndCursor] = useState<string | null>(null);
-  const [hasNextPage, setHasNextPage] = useState<boolean>(true);
   const [loading, setLoading] = useState<boolean>(true);
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
-  // Instead of storing a selected photo, we now store its index.
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const navigation = useNavigation();
 
+  // Separate pagination state for photos and videos.
+  const [photoCursor, setPhotoCursor] = useState<string | null>(null);
+  const [videoCursor, setVideoCursor] = useState<string | null>(null);
+  const [photoHasNextPage, setPhotoHasNextPage] = useState<boolean>(true);
+  const [videoHasNextPage, setVideoHasNextPage] = useState<boolean>(true);
+  const hasNextPage = photoHasNextPage || videoHasNextPage;
+
   useEffect(() => {
-    navigation.setOptions({ headerShown: false }); // Remove the title
+    navigation.setOptions({ headerShown: false });
   }, [navigation]);
 
-  // In-memory cache for asset info.
+  // Cache asset info in memory.
   const assetCache = useRef<Map<string, ExtendedAsset>>(new Map());
 
-  // --- NEW: Setup for passive notifications when near a photo location ---
-  // Cooldown period (in milliseconds) so that the user isn’t spammed repeatedly.
-  const NOTIFICATION_COOLDOWN = 10 * 60 * 1000; // 10 minutes
-
-  // A ref to store the latest list of photos.
+  // For notifications based on location.
+  const NOTIFICATION_COOLDOWN = 10 * 60 * 1000;
   const photoLocationsRef = useRef<Photo[]>(photos);
   useEffect(() => {
     photoLocationsRef.current = photos;
   }, [photos]);
-
-  // A ref to keep track of when we last notified the user about a specific photo location.
   const notifiedPhotosRef = useRef<{ [id: string]: number }>({});
 
-  /**
-   * Checks whether the current location is near any photo’s location.
-   * If so, and if not notified recently, sends a notification.
-   */
   function checkForPhotoLocationMatch(currentCoords: Coords) {
     photoLocationsRef.current.forEach((photo) => {
       if (isSameLocation(currentCoords, photo.location, 0.01)) {
         const lastNotified = notifiedPhotosRef.current[photo.id];
         if (!lastNotified || Date.now() - lastNotified > NOTIFICATION_COOLDOWN) {
-          sendNotification("You're near a place where you took a photo! Remember this moment?");
+          sendNotification("You're near a place where you captured a moment! Remember this experience?");
           notifiedPhotosRef.current[photo.id] = Date.now();
         }
       }
     });
   }
 
-  // --- End of passive notifications setup ---
-
   /**
-   * Loads a batch of photos from the media library that include location metadata
-   * near the provided coordinates.
+   * Loads more media items (photos and videos) with separate pagination for each.
    */
   async function loadMorePhotos(coords: Coords) {
-    if (!hasNextPage && endCursor) return;
     if (loadingMore) return;
-
     setLoadingMore(true);
-
     try {
-      // Fetch a batch of photos (e.g., 10 photos)
-      const mediaResult = await MediaLibrary.getAssetsAsync({
+      // Query photo assets using its own cursor.
+      const photoResult = await MediaLibrary.getAssetsAsync({
         mediaType: 'photo',
         first: 10,
-        after: endCursor || undefined,
+        after: photoCursor || undefined,
       });
+      setPhotoCursor(photoResult.endCursor);
+      setPhotoHasNextPage(photoResult.hasNextPage);
 
-      // Update pagination state.
-      setEndCursor(mediaResult.endCursor);
-      setHasNextPage(mediaResult.hasNextPage);
+      // Query video assets using its own cursor.
+      const videoResult = await MediaLibrary.getAssetsAsync({
+        mediaType: 'video',
+        first: 10,
+        after: videoCursor || undefined,
+      });
+      setVideoCursor(videoResult.endCursor);
+      setVideoHasNextPage(videoResult.hasNextPage);
 
-      const newPhotos: Photo[] = [];
-      for (const asset of mediaResult.assets) {
-        let assetInfo: ExtendedAsset;
-        if (assetCache.current.has(asset.id)) {
-          assetInfo = assetCache.current.get(asset.id)!;
-        } else {
-          assetInfo = (await MediaLibrary.getAssetInfoAsync(asset.id)) as ExtendedAsset;
-          assetCache.current.set(asset.id, assetInfo);
-        }
+      // Process photo assets.
+      const processedPhotos = await Promise.all(
+        photoResult.assets.map(async (asset) => {
+          let assetInfo: ExtendedAsset;
+          if (assetCache.current.has(asset.id)) {
+            assetInfo = assetCache.current.get(asset.id)!;
+          } else {
+            assetInfo = (await MediaLibrary.getAssetInfoAsync(asset.id)) as ExtendedAsset;
+            assetCache.current.set(asset.id, assetInfo);
+          }
+          // For photos, include them even if they lack location data.
+          if (assetInfo.location && !isSameLocation(
+            { latitude: assetInfo.location.latitude, longitude: assetInfo.location.longitude },
+            coords,
+            0.05
+          )) {
+            return null;
+          }
+          return {
+            id: assetInfo.id,
+            uri: assetInfo.localUri || assetInfo.uri,
+            location: assetInfo.location
+              ? {
+                  latitude: assetInfo.location.latitude,
+                  longitude: assetInfo.location.longitude,
+                }
+              : { latitude: 0, longitude: 0 },
+            mediaType: 'photo' as const,
+          } as Photo;
+        })
+      );
 
-        if (assetInfo && assetInfo.location) {
+      // Process video assets.
+      const processedVideos = await Promise.all(
+        videoResult.assets.map(async (asset) => {
+          let assetInfo: ExtendedAsset;
+          if (assetCache.current.has(asset.id)) {
+            assetInfo = assetCache.current.get(asset.id)!;
+          } else {
+            assetInfo = (await MediaLibrary.getAssetInfoAsync(asset.id)) as ExtendedAsset;
+            assetCache.current.set(asset.id, assetInfo);
+          }
+          // For videos, require that location metadata exists and matches.
+          if (!assetInfo.location) return null;
           if (
-            isSameLocation(
-              {
-                latitude: assetInfo.location.latitude,
-                longitude: assetInfo.location.longitude,
-              },
+            !isSameLocation(
+              { latitude: assetInfo.location.latitude, longitude: assetInfo.location.longitude },
               coords,
               0.05
             )
           ) {
-            newPhotos.push({
-              id: assetInfo.id,
-              uri: assetInfo.localUri || assetInfo.uri,
-              location: {
-                latitude: assetInfo.location.latitude,
-                longitude: assetInfo.location.longitude,
-              },
-            });
+            return null;
           }
-        }
-      }
-      setPhotos((prevPhotos) => [...prevPhotos, ...newPhotos]);
+          // Build the video asset.
+          const mediaItem: Photo = {
+            id: assetInfo.id,
+            uri: assetInfo.localUri || assetInfo.uri,
+            location: {
+              latitude: assetInfo.location.latitude,
+              longitude: assetInfo.location.longitude,
+            },
+            mediaType: 'video',
+            duration: assetInfo.duration, // Set video duration (in seconds).
+          };
+
+          try {
+            // Copy the video to cache so that it is accessible.
+            const accessibleUri = await copyVideoToCache(mediaItem.uri);
+            mediaItem.uri = accessibleUri;
+            // Generate a thumbnail.
+            const { uri: thumbUri } = await VideoThumbnails.getThumbnailAsync(accessibleUri, {
+              time: 1000,
+            });
+            mediaItem.thumbnailUri = thumbUri;
+          } catch (e) {
+            console.warn('Error generating thumbnail for video:', mediaItem.uri, e);
+          }
+          return mediaItem;
+        })
+      );
+
+      // Merge the processed results and filter out nulls.
+      const mergedMedia: Photo[] = [
+        ...processedPhotos.filter((item): item is Photo => item !== null),
+        ...processedVideos.filter((item): item is Photo => item !== null),
+      ];
+
+      // Merge with the existing state and deduplicate by asset ID.
+      setPhotos((prevPhotos) => {
+        const combined = [...prevPhotos, ...mergedMedia];
+        const deduped = Array.from(new Map(combined.map(item => [item.id, item])).values());
+        return deduped;
+      });
     } catch (error) {
       console.error('Error loading more photos', error);
     } finally {
@@ -303,68 +373,52 @@ export default function PhotoGallery() {
     }
   }
 
-  // Request permissions on mount.
+  // Request permissions and load initial data.
   useEffect(() => {
     (async () => {
-      // Request notification permission.
       const { status: notifStatus } = await Notifications.requestPermissionsAsync();
       if (notifStatus !== 'granted') {
         Alert.alert('Notification permission denied', 'Notifications are required for location alerts.');
       }
-
-      // Request location permission.
       const { status: locStatus } = await Location.requestForegroundPermissionsAsync();
       if (locStatus !== 'granted') {
         Alert.alert('Permission denied', 'Location permission is required.');
         return;
       }
-      // Request media library permission.
       const { status: mediaStatus } = await MediaLibrary.requestPermissionsAsync();
       if (mediaStatus !== 'granted') {
         Alert.alert('Permission denied', 'Media library access is required.');
         return;
       }
-
-      // Get initial location.
       const locResult = await Location.getCurrentPositionAsync({});
       const coords = locResult.coords;
       setCurrentLocation(coords);
-
-      // Reverse geocode the current location for notification text.
       const locationName = await formatLocation(coords);
-
-      // Check if this location was visited before.
-      const alreadyVisited = visitedLocations.some((prev) =>
-        isSameLocation(prev, coords, 0.01)
-      );
+      const alreadyVisited = visitedLocations.some((prev) => isSameLocation(prev, coords, 0.01));
       if (alreadyVisited) {
         sendNotification(`You're at ${locationName}! Remember this moment?`);
       } else {
         sendNotification(`You're at ${locationName}! Capture the moment?`);
         setVisitedLocations((prev) => [...prev, coords]);
       }
-
-      // Load the first batch of photos.
       await loadMorePhotos(coords);
       setLoading(false);
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // --- NEW: Setup a subscription to watch for location updates ---
+  // Subscribe to location updates.
   useEffect(() => {
     let subscription: Location.LocationSubscription;
     (async () => {
       subscription = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.High,
-          timeInterval: 10000, // check every 10 seconds
-          distanceInterval: 50, // or every 50 meters
+          timeInterval: 10000,
+          distanceInterval: 50,
         },
         (location) => {
           const newCoords = location.coords;
           setCurrentLocation(newCoords);
-          // Check if we're near a location where we took a photo.
           checkForPhotoLocationMatch(newCoords);
         }
       );
@@ -375,16 +429,13 @@ export default function PhotoGallery() {
       }
     };
   }, []);
-  // --- End of location subscription setup ---
 
-  // useCallback helps keep the same function reference between renders.
   const handleEndReached = useCallback(() => {
     if (currentLocation && hasNextPage && !loadingMore) {
       loadMorePhotos(currentLocation);
     }
   }, [currentLocation, hasNextPage, loadingMore]);
 
-  // When a photo is tapped, determine its index in the array and open the modal.
   const handlePhotoPress = (photo: Photo) => {
     const index = photos.findIndex((p) => p.id === photo.id);
     if (index !== -1) {
@@ -402,7 +453,7 @@ export default function PhotoGallery() {
       {loading ? (
         <ActivityIndicator size="large" color="#0000ff" style={{ marginTop: 50 }} />
       ) : photos.length === 0 ? (
-        <Text style={styles.message}>No photos found for this location.</Text>
+        <Text style={styles.message}>No media items found for this location.</Text>
       ) : (
         <PhotoList
           photos={photos}
@@ -411,8 +462,6 @@ export default function PhotoGallery() {
           onPhotoPress={handlePhotoPress}
         />
       )}
-
-      {/* Modal for swiping between photos */}
       <Modal visible={selectedIndex !== null} transparent={true} animationType="fade">
         <ModalPhotoViewer
           photos={photos}
@@ -425,8 +474,10 @@ export default function PhotoGallery() {
 }
 
 /**
- * ModalPhotoViewer renders a horizontally swipable, full-screen photo viewer.
- * Each photo is wrapped in a ScrollView to allow pinch-to-zoom.
+ * ModalPhotoViewer renders a horizontally swipable, full-screen media viewer.
+ * For photos, it uses a ScrollView (allowing pinch-to-zoom);
+ * for videos, it renders the Video component with native controls.
+ * Videos will auto-play when displayed.
  */
 const ModalPhotoViewer = ({
   photos,
@@ -438,6 +489,22 @@ const ModalPhotoViewer = ({
   onClose: () => void;
 }) => {
   const { width, height } = Dimensions.get('window');
+  const [currentVisibleIndex, setCurrentVisibleIndex] = useState(initialIndex);
+
+  // onViewableItemsChanged callback: update currentVisibleIndex when viewable items change.
+  const onViewableItemsChanged = useRef(
+    ({ viewableItems }: { viewableItems: Array<{ index?: number }> }) => {
+      if (viewableItems && viewableItems.length > 0 && viewableItems[0].index !== undefined) {
+        setCurrentVisibleIndex(viewableItems[0].index);
+      }
+    }
+  ).current;
+
+  // Configure viewability so that we consider an item "visible" when most of it is in view.
+  const viewabilityConfig = useRef({
+    viewAreaCoveragePercentThreshold: 95,
+  }).current;
+
   return (
     <View style={styles.modalBackground}>
       <TouchableOpacity style={styles.modalCloseButton} onPress={onClose}>
@@ -448,21 +515,35 @@ const ModalPhotoViewer = ({
         horizontal
         pagingEnabled
         initialScrollIndex={initialIndex}
+        viewabilityConfig={viewabilityConfig}
         getItemLayout={(_data, index) => ({
           length: width,
           offset: width * index,
           index,
         })}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <ScrollView
-            maximumZoomScale={3}
-            minimumZoomScale={1}
-            contentContainerStyle={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}
-          >
-            <Image source={{ uri: item.uri }} style={{ width, height, resizeMode: 'contain' }} />
-          </ScrollView>
-        )}
+        renderItem={({ item, index }) =>
+          item.mediaType === 'video' ? (
+            <Video
+              source={{ uri: item.uri }}
+              style={{ width, height }}
+              useNativeControls
+              isLooping
+              shouldPlay={index === currentVisibleIndex}
+            />
+          ) : (
+            <ScrollView
+              maximumZoomScale={3}
+              minimumZoomScale={1}
+              contentContainerStyle={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}
+            >
+              <Image
+                source={{ uri: item.uri }}
+                style={{ width, height, resizeMode: 'contain' }}
+              />
+            </ScrollView>
+          )
+        }
       />
     </View>
   );
@@ -471,7 +552,7 @@ const ModalPhotoViewer = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F5F7', 
+    backgroundColor: '#F5F5F7',
     paddingTop: 30,
   },
   header: {
@@ -506,6 +587,32 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     resizeMode: 'cover',
+  },
+  videoIconOverlay: {
+    position: 'absolute',
+    top: 5,
+    left: 5,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 12,
+    padding: 4,
+  },
+  videoIconText: {
+    color: '#fff',
+    fontSize: 14,
+  },
+  videoDurationOverlay: {
+    position: 'absolute',
+    bottom: 5,
+    right: 5,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  videoDurationText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
   },
   modalBackground: {
     flex: 1,
