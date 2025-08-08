@@ -11,6 +11,7 @@ import {
   Modal,
   ScrollView,
   Dimensions,
+  RefreshControl,
 } from 'react-native';
 import * as Location from 'expo-location';
 import * as MediaLibrary from 'expo-media-library';
@@ -181,11 +182,12 @@ const PhotoItem = React.memo(({ photo, onPress }: { photo: Photo; onPress: (phot
 /**
  * Component that renders the grid of media items.
  */
-const PhotoList = React.memo(({ photos, onEndReached, loadingMore, onPhotoPress, }: {
+const PhotoList = React.memo(({ photos, onEndReached, loadingMore, onPhotoPress, refreshControl }: {
   photos: Photo[];
   onEndReached: () => void;
   loadingMore: boolean;
   onPhotoPress: (photo: Photo) => void;
+  refreshControl?: React.ReactElement;
 }) => {
   const renderItem = useCallback(({ item }: { item: Photo }) => <PhotoItem photo={item} onPress={onPhotoPress} />, [onPhotoPress]);
   return (
@@ -198,6 +200,7 @@ const PhotoList = React.memo(({ photos, onEndReached, loadingMore, onPhotoPress,
       ListFooterComponent={loadingMore ? (<ActivityIndicator size="small" color="#0000ff" style={{ margin: 20 }} />) : null}
       numColumns={3}
       contentContainerStyle={styles.photoListContainer}
+      refreshControl={refreshControl}
     />
   );
 });
@@ -212,6 +215,7 @@ export default function PhotoGallery() {
   const [loading, setLoading] = useState<boolean>(true);
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const navigation = useNavigation();
 
   // Separate pagination state for photos and videos.
@@ -443,6 +447,18 @@ export default function PhotoGallery() {
     }
   };
 
+  const handleRefresh = useCallback(async () => {
+    if (!currentLocation) return;
+    setRefreshing(true);
+    setPhotos([]);
+    setPhotoCursor(null);
+    setVideoCursor(null);
+    setPhotoHasNextPage(true);
+    setVideoHasNextPage(true);
+    await loadMorePhotos(currentLocation);
+    setRefreshing(false);
+  }, [currentLocation]);
+
   return (
     <View style={styles.container}>
       {currentLocation ? (
@@ -460,6 +476,9 @@ export default function PhotoGallery() {
           onEndReached={handleEndReached}
           loadingMore={loadingMore}
           onPhotoPress={handlePhotoPress}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+          }
         />
       )}
       <Modal visible={selectedIndex !== null} transparent={true} animationType="fade">
